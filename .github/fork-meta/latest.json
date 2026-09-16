@@ -1,0 +1,18 @@
+{
+  "status": {
+    "code": "ready"
+  },
+  "release": {
+    "tag": "sillydroid-v1.0.1.68-1.19.0-debug",
+    "title": "SillyDroid Android v1.0.1.68 / Tavern 1.19.0 debug",
+    "buildType": "debug",
+    "versionName": "1.0.1.68+tavern.1.19.0",
+    "hostVersion": "1.0.1.68",
+    "notesMarkdown": "## 本次更新内容\n\n- 8b86bc7\n  - Auto-configure auto-update pipeline (tracker, meta publisher, stub README, debug build)\n\n\n## SillyDroid Android APK\n\n- Host version: 1.0.1.68\n- Upstream repo: SillyTavern/SillyTavern\n- Upstream tag: 1.19.0\n- Build type: debug\n- Rootfs source: built\n- Dependency source: disabled\n- Server source: built\n- Build source: built\n- APK asset: sillydroid-android-v1.0.1.68-1.19.0-debug.apk\n- APK SHA256: 62a24f16241eb07229101da1121dc0b1470744c89f01dc830b3ba0a7246ca73d\n- APK size bytes: 332521651\n",
+    "apk": {
+      "assetName": "sillydroid-android-v1.0.1.68-1.19.0-debug.apk",
+      "downloadUrl": "https://github.com/xtzhdhl/using/releases/download/sillydroid-v1.0.1.68-1.19.0-debug/sillydroid-android-v1.0.1.68-1.19.0-debug.apk",
+      "sha256": "62a24f16241eb07229101da1121dc0b1470744c89f01dc830b3ba0a7246ca73d"
+    }
+  }
+}
