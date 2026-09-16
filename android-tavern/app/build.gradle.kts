@@ -250,18 +250,18 @@ android {
         versionName = androidVersionName
         buildConfigField("String", "SILLYDROID_HOST_VERSION", quoteBuildConfigString(androidHostVersion))
         buildConfigField("String", "SILLYDROID_UPSTREAM_VERSION", quoteBuildConfigString(androidUpstreamVersion))
-        buildConfigField("String", "SILLYDROID_GITHUB_REPOSITORY", quoteBuildConfigString("jialmaster/SillyDroid"))
+        buildConfigField("String", "SILLYDROID_GITHUB_REPOSITORY", quoteBuildConfigString("xtzhdhl/using"))
         // App 内更新与官网首页共用同一份 latest JSON，避免继续扫描 GitHub Releases API
         // 并在 release 删除 / 编辑后读到过期的 latest 语义。
         buildConfigField(
             "String",
             "SILLYDROID_LATEST_RELEASE_METADATA_URL",
-            quoteBuildConfigString("https://sd.jlmaster.online/api/projects/sillydroid/releases/latest.json")
+            quoteBuildConfigString("https://cdn.jsdelivr.net/gh/xtzhdhl/using@master/.github/fork-meta/latest.json")
         )
         buildConfigField(
             "String",
             "SILLYDROID_CRASH_LOG_UPLOAD_URL",
-            quoteBuildConfigString("https://sd.jlmaster.online/api/admin/projects/sillydroid/crash-logs")
+            quoteBuildConfigString("")
         )
         buildConfigField(
             "String",

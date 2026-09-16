@@ -1,0 +1,109 @@
+name: track-upstream-tavern
+
+# Fork 专用：巡检 SillyTavern 官方最新 release，发现新版本就自动触发 APK 构建。
+# 放置于 .github/workflows/track-upstream-tavern.yml
+# 首次启用前，请确认本仓库 Releases 里已有一个 sillydroid-v* 开头的 release（种子 release 也行），
+# 否则脚本会把"从未构建过"当作最新并直接开建——这正是期望行为，只是提醒你它会立刻开工。
+
+on:
+  schedule:
+    # ─── 巡检频率（当前定案：每 3 天 1 次）─────────────────────
+    # 想改频率时只需替换下面这一行（cron 按 UTC，北京时间 = UTC+8）：
+    #   每 3 天 10:00（当前生效）  → cron: '0 2 */3 * *'
+    #   每月 1 号 10:00            → cron: '0 2 1 * *'
+    #   每月 15 号 10:00           → cron: '0 2 15 * *'
+    #   每周一 10:00               → cron: '0 2 * * 1'
+    #   每天 10:00                 → cron: '0 2 * * *'
+    # 注意：巡检只会"看"，官方没发新版就直接退出，不构建、不发布、碰不到你的手机。
+    # 等不及重复周期时：Actions → track-upstream-tavern → Run workflow 手动触发即刻跟进。
+    - cron: '0 2 */3 * *'
+  workflow_dispatch:
+    inputs:
+      tavern_tag:
+        description: '强制构建指定 tag（留空则自动比对官方最新）'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: track-upstream-tavern
+  cancel-in-progress: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve upstream latest SillyTavern tag
+        id: upstream
+        run: |
+          set -euo pipefail
+          tag="$(gh api 'repos/SillyTavern/SillyTavern/releases/latest' --jq '.tag_name')"
+          echo "upstream_tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "官方最新 tag：${tag}"
+
+      - name: Resolve last built tavern tag in this fork
+        id: built
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          # 取本 fork 最新的一个 sillydroid-v* release（按创建时间倒序的第一个）
+          tag="$(gh api "repos/${repo}/releases?per_page=100" \
+            --jq '[.[].tag_name | select(startswith("sillydroid-v"))][0] // ""')"
+          if [ -z "$tag" ]; then
+            echo '本 fork 尚无任何 APK release（种子 release 未建？）按从未构建处理。'
+            echo 'built_tag=' >> "$GITHUB_OUTPUT"
+          else
+            # 形如 sillydroid-v1.0.1.68-1.19.0-release → 提取 1.19.0
+            tavern="$(printf '%s' "$tag" | sed -E 's/^sillydroid-v[0-9.]+-//; s/-(release|debug)$//')"
+            echo "built_tag=${tavern}" >> "$GITHUB_OUTPUT"
+            echo "fork 最近已构建：${tavern}（tag: ${tag}）"
+          fi
+
+      - name: Skip when an APK build is already running
+        id: inflight
+        run: |
+          set -euo pipefail
+          busy="$(gh run list --workflow=sillydroid-upstream-apk.yml \
+            --status queued --json databaseId --jq 'length')"
+          busy2="$(gh run list --workflow=sillydroid-upstream-apk.yml \
+            --status in_progress --json databaseId --jq 'length')"
+          total=$((busy + busy2))
+          echo "inflight=${total}" >> "$GITHUB_OUTPUT"
+          echo "进行中的构建数：${total}"
+
+      - name: Decide and dispatch
+        run: |
+          set -euo pipefail
+          upstream='${{ steps.upstream.outputs.upstream_tag }}'
+          built='${{ steps.built.outputs.built_tag }}'
+          forced='${{ inputs.tavern_tag }}'
+          inflight='${{ steps.inflight.outputs.inflight }}'
+
+          if [ "$inflight" != '0' ]; then
+            echo "已有构建在进行（${inflight} 个），本轮跳过，下一轮再查。"
+            exit 0
+          fi
+
+          target="$upstream"
+          reason='官方最新 != 已构建'
+          if [ -n "$forced" ]; then
+            target="$forced"
+            reason='手动指定 tavern_tag'
+          elif [ "$built" = "$upstream" ]; then
+            echo "已是最新（${upstream}），无事发生。"
+            exit 0
+          fi
+
+          echo "触发构建：${target}（原因：${reason}）"
+          gh workflow run sillydroid-upstream-apk.yml \
+            --ref master \
+            -f tavern_tag="$target" \
+            -f build_type=auto \
+            -f publish_target=release \
+            -f force_rebuild=false

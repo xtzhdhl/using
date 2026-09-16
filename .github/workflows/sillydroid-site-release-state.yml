@@ -1,69 +1,28 @@
 name: SillyDroid Site Release State
 
+# Fork 覆盖版（放回 fork 仓库的同名路径 .github/workflows/sillydroid-site-release-state.yml）：
+# 作者原版会往他的自建站点 sd.jlmaster.online 推发布状态，fork 里没有对应 WriterKey，
+# 原样保留只会永远红叉；直接删掉文件又会破坏构建链 publish 步骤里的
+# `gh workflow run sillydroid-site-release-state.yml`（按名 dispatch，文件不存在则报错）。
+# 所以这里保留文件名与工作流名，内容替换为 no-op，保证主构建链路全绿。
+# 想还原上游行为：Sync fork 后选择还原本文件即可。
+
 on:
   workflow_dispatch:
     inputs:
       release_event_action:
-        description: Manual trigger reason used in the generated site release state.
+        description: 'original event action (ignored on fork)'
         required: false
-        default: manual-rebuild
-        type: choice
-        options:
-          - published
-          - edited
-          - deleted
-          - manual-rebuild
-  release:
-    types:
-      - published
-      - edited
-      - deleted
+        default: ''
+        type: string
 
-permissions:
-  contents: read
-
-concurrency:
-  group: sillydroid-site-release-state
-  cancel-in-progress: true
+permissions: {}
 
 jobs:
-  publish-release-state:
+  noop:
+    # 双保险：即便误在作者仓库运行也直接跳过
+    if: github.repository != 'jialmaster/SillyDroid'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout default branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-
-      - name: Build latest release state
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_EVENT_ACTION: ${{ github.event_name == 'release' && github.event.action || github.event.inputs.release_event_action || 'manual-rebuild' }}
-        run: |
-          set -euo pipefail
-
-          bash ./scripts/publish-sillydroid-site-release-state.sh \
-            --repository '${{ github.repository }}' \
-            --event-action "$RELEASE_EVENT_ACTION" \
-            --output "$RUNNER_TEMP/latest-release.json"
-
-      - name: Publish latest release state to site API
-        env:
-          SILLYDROID_SITE_RELEASE_API_URL: ${{ vars.SILLYDROID_SITE_RELEASE_API_URL || 'https://sd.jlmaster.online/api/admin/projects/sillydroid/releases/latest' }}
-          SILLYDROID_SITE_RELEASE_WRITER_KEY: ${{ secrets.SILLYDROID_SITE_RELEASE_WRITER_KEY }}
-        run: |
-          set -euo pipefail
-
-          for variable_name in SILLYDROID_SITE_RELEASE_API_URL SILLYDROID_SITE_RELEASE_WRITER_KEY; do
-            if [ -z "${!variable_name:-}" ]; then
-              echo "Missing required GitHub Actions secret: $variable_name" >&2
-              exit 1
-            fi
-          done
-
-          # 站点后端负责校验、存储并发布 latest release state；Android 发布链只负责按契约推送 JSON。
-          curl --fail-with-body --silent --show-error \
-            -X PUT "$SILLYDROID_SITE_RELEASE_API_URL" \
-            -H 'Content-Type: application/json' \
-            -H "X-SillyDroid-Release-Key: $SILLYDROID_SITE_RELEASE_WRITER_KEY" \
-            --data-binary @"$RUNNER_TEMP/latest-release.json"
+      - name: Nothing to do on fork
+        run: echo "Fork detected; skipping external site state update. input=${{ inputs.release_event_action }}"

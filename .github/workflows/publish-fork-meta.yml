@@ -1,0 +1,167 @@
+name: publish-fork-meta
+
+# Fork 专用：每当 tavern-upstream-apk 构建工作流成功完成，
+# 自动组装 App 内更新器可读的 latest.json，并提交到 master 的 .github/fork-meta/latest.json。
+#
+# 为什么用 workflow_run 而不是 release: published？
+# 因为 APK release 是构建链用 GITHUB_TOKEN 创建的，GitHub 的递归限制
+# 会吞掉由它引发的 release 事件；workflow_run 专为监听"由 token 触发的工作流"而设计。
+#
+# App 端（SiteLatestReleaseParser）要求的 JSON 契约：
+# {
+#   "status": { "code": "ready" },
+#   "release": {
+#     "tag": "...", "title": "...",
+#     "buildType": "release|debug",
+#     "versionName": "1.0.1.68+tavern.1.19.0",
+#     "hostVersion": "1.0.1.68",
+#     "notesMarkdown": "更新说明(markdown)",
+#     "apk": { "assetName": "*.apk", "downloadUrl": "https://...", "sha256": "<64hex>" }
+#   }
+# }
+#
+# 数据来源：<artifact>.update.json 资产（gh api 下载，避免 python 直连撞 S3 重定向鉴权）
+# 加 release 元数据（标题/说明/APK browser_download_url）。
+#
+# 放置于 .github/workflows/publish-fork-meta.yml
+
+on:
+  workflow_run:
+    workflows: [tavern-upstream-apk]
+    types: [completed]
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '指定要生成 latest.json 的 release tag（留空取最新 sillydroid-v*）'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-fork-meta
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: >-
+      github.repository != 'jialmaster/SillyDroid' &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        github.event_name == 'release' ||
+        github.event.workflow_run.conclusion == 'success'
+      )
+    runs-on: ubuntu-latest
+    steps:
+      # 必须先 checkout：后面要 git add/commit/push，工作区不能是裸的
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Pick target release
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          # 手动指定 > release 事件自带 tag > 自动取最新 sillydroid-v*
+          wanted='${{ github.event.release.tag_name || inputs.release_tag }}'
+          if [ -n "$wanted" ]; then
+            gh api "repos/${repo}/releases/tags/${wanted}" > release.json
+          else
+            gh api "repos/${repo}/releases?per_page=100" --jq \
+              '[.[] | select(.tag_name | startswith("sillydroid-v"))][0]' > release.json
+          fi
+          tag="$(python3 -c 'import json; print(json.load(open("release.json"))["tag_name"])')"
+          echo "target_tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "目标 release：${tag}"
+
+      - name: Download update.json metadata asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          asset_id="$(gh api "repos/${repo}/releases/tags/${{ steps.pick.outputs.target_tag }}" \
+            --jq '.assets[] | select(.name | endswith(".update.json")) | .id')"
+          if [ -z "$asset_id" ]; then
+            echo '该 release 没有 .update.json 资产（多半是非构建 release），跳过。'
+            exit 0
+          fi
+          gh api "repos/${repo}/releases/assets/${asset_id}" \
+            -H "Accept: application/octet-stream" > meta.json
+          python3 -c 'import json; json.load(open("meta.json"))'
+          echo 'update.json 校验通过。'
+
+      - name: Assemble latest.json
+        run: |
+          set -euo pipefail
+          if [ ! -f meta.json ]; then
+            echo '无 meta.json（见上一步），本次不生成。'
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, os
+
+          release = json.load(open('release.json', encoding='utf-8'))
+          meta = json.load(open('meta.json', encoding='utf-8'))
+          apk_assets = [a for a in release.get('assets', []) if a.get('name', '').endswith('.apk')]
+          if not apk_assets:
+              print('release 缺少 APK 资产，跳过。')
+              raise SystemExit(0)
+          apk_asset = apk_assets[0]
+
+          def s(key, default=''):
+              return str(meta.get(key) or default).strip()
+
+          latest = {
+              'status': {'code': 'ready'},
+              'release': {
+                  'tag': s('release_tag'),
+                  'title': str(release.get('name') or s('release_tag')).strip(),
+                  'buildType': s('build_type'),
+                  'versionName': s('version_name'),
+                  'hostVersion': s('host_version'),
+                  'notesMarkdown': str(release.get('body') or ''),
+                  'apk': {
+                      'assetName': s('apk_asset_name') or apk_asset['name'],
+                      'downloadUrl': apk_asset['browser_download_url'],
+                      'sha256': s('apk_sha256'),
+                  },
+              },
+          }
+          os.makedirs('.github/fork-meta', exist_ok=True)
+          with open('.github/fork-meta/latest.json', 'w', encoding='utf-8') as fh:
+              json.dump(latest, fh, ensure_ascii=False, indent=2)
+          print(json.dumps(latest, ensure_ascii=False)[:400])
+          PY
+
+      - name: Commit latest.json
+        run: |
+          set -euo pipefail
+          if [ ! -f .github/fork-meta/latest.json ]; then
+            echo '没有产出 latest.json，本次不提交。'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/fork-meta/latest.json
+          if git diff --cached --quiet; then
+            echo '内容无变化，跳过提交。'
+            exit 0
+          fi
+          git commit -m "chore(fork-meta): update latest.json for ${{ steps.pick.outputs.target_tag }}"
+          git push origin HEAD:${{ github.event.repository.default_branch || 'master' }}
+
+      - name: Print CDN reminder
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          echo "latest.json 已更新。App 读取地址（jsDelivr 有几分钟缓存）："
+          echo "https://cdn.jsdelivr.net/gh/${REPO}@master/.github/fork-meta/latest.json"

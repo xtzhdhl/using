@@ -1,15 +1,14 @@
 {
   "build": {
     "tavernVersion": "latest",
-    "buildType": "release",
+    "buildType": "debug",
     "termuxPackages": [
       "git",
       "nodejs-lts",
       "curl",
       "npm"
     ],
-    "includeDependencyPacks": [
-    ]
+    "includeDependencyPacks": []
   },
   "defaultExtensionRepositories": [
     {
